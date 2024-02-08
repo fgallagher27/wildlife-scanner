@@ -1,0 +1,17 @@
+# environment.yml
+name: wildlife-scanner
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - gitpython
+  - numpy
+  - pandas
+  - matplotlib
+  - Pillow
+  - tqdm
+  - scikit-learn
+  - torch
+  - torchvision
+  - pyyaml
+  - black
