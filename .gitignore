@@ -1,6 +1,9 @@
 # raw data
 data/
 
+# pytorch model files for size
+.pth
+
 #.DS_Store extensions
 .DS_store
 # Byte-compiled / optimized / DLL files
