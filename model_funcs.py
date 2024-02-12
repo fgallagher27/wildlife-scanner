@@ -128,7 +128,10 @@ def split_train_test(
         dev_dist = dev_set.select_dtypes(include='number').sum(axis=0).divide(dev_m)
 
         # 4. If not repeat steps 2-3, otherwise store test/train sets
+        count = 1
         while not check_mean_diff(distribution, dev_dist, tolerance):
+            if count == 10:
+                raise TimeoutError("No suitable train/test split after 10 iterations, please relax tolerance")
             # resample testing sites
             random.shuffle(random_sites)
             train_set = pd.DataFrame()
@@ -149,6 +152,7 @@ def split_train_test(
 
             dev_m = dev_set.shape[0]
             dev_dist = dev_set.select_dtypes(include='number').sum(axis=0).divide(dev_m)
+            count += 1
         
         # split into features and labels
         dev_lab, dev_feat = split_by_type(dev_set)
