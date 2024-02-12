@@ -11,8 +11,9 @@ def split_train_test(
         features: pd.DataFrame,
         labels: pd.DataFrame,
         p: float = 0.2,
-        tolerance: float = 0.025
-):
+        mean_diff_tol: float = 0.01,
+        max_diff_tol: float = 0.04
+    ):
     """
     To create the train dev split, each camera site is used
     either for testing or training to avoid overfitting
@@ -35,8 +36,9 @@ def split_train_test(
         - features: the features dataframe with columns filepath and site indxed by id
         - labels: labels corresponding to each id in features indexed by id
         - p: proportion of dataset to put into dev set, 20% by default
-        - tolerance: mean squared difference limit on full dataset and dev set
-        set to 2.5% by default
+        - mean_diff_tol: mean difference limit on full dataset and dev set
+        set to 1%
+        - max_diff_tol: max difference limit set to 2% by default
 
     """
     assert p >= 0.1, "Dev size proportion should not be below 0.1 to ensure it cannot be met by 1 large site"
@@ -62,11 +64,11 @@ def split_train_test(
     paths = [dev_feat_dir, dev_lab_dir, train_feat_dir, train_lab_dir]
 
     if all(os.path.exists(path) for path in paths):
-        print("Loading existing train / dev sets...")
-        dev_feat = pd.read_csv(dev_feat_dir)
-        dev_lab = pd.read_csv(dev_lab_dir)
+        print("Loading existing train, dev sets...")
+        dev_feat = pd.read_csv(dev_feat_dir, index_col=0)
+        dev_lab = pd.read_csv(dev_lab_dir, index_col=0)
         dev_full = dev_feat.join(dev_lab)
-        dev_dist = dev_full.sum(axis=0).divide(dev_full.shape[0])
+        dev_dist = dev_full.select_dtypes(include='number').sum(axis=0).divide(dev_full.shape[0])
         dev_p = dev_full.shape[0] / m
 
         # check that test set found matches critera set out
@@ -80,20 +82,24 @@ def split_train_test(
                     f"Dev proportion = {dev_dist}\n"
                     f"Returning loaded train and dev sets"
                 )
-                train_feat = pd.read_csv(train_feat_dir)
-                train_lab = pd.read_csv(train_lab_dir)
+                train_feat = pd.read_csv(train_feat_dir, index_col=0)
+                train_lab = pd.read_csv(train_lab_dir, index_col=0)
+                execute_split = False
                 return train_feat, train_lab, dev_feat, dev_lab
             else:
                 print(
                     f"Test proportion does not fall within acceptable proportion:\n"
-                    f"Dataset proportion = {distribution}\n"
-                    f"Dev proportion = {dev_dist}"
+                    f"Dataset proportion:\n{distribution}\n"
+                    f"Dev proportion:\n{dev_dist}"
                 )
+                execute_split = True
         else:
             print(f"Test size does not fall within acceptable range:\np = {p}\ndev_p = {dev_p}")
-
-            
+            execute_split = True
     else:
+        execute_split = True
+
+    if execute_split:
         # check in interim file folder exists and if not create it
         dir = os.path.join("data", "interim_files")
         if not os.path.exists(dir):
@@ -115,12 +121,15 @@ def split_train_test(
         # dev size = target_size (to 2 dp)
         for site in random_sites:
             temp = full_dataset.loc[full_dataset['site'] == site, :]
-            current_p += temp.shape[0] / m
+            current_p += (temp.shape[0] / m)
 
-            if abs(current_p - p) <= 0.01:
-                dev_set = dev_set.concat(temp)
+            if p >= current_p:
+                if current_p - p > 0.01:
+                    train_set = pd.concat([train_set, temp])
+                else:
+                    dev_set = pd.concat([dev_set, temp])
             else:
-                train_set = train_set.concat(temp)
+                train_set = pd.concat([train_set, temp])
 
         # 3. check if dev proportion and train proportion of animal
         # observations are roughly similar
@@ -129,26 +138,29 @@ def split_train_test(
 
         # 4. If not repeat steps 2-3, otherwise store test/train sets
         count = 1
-        while not check_mean_diff(distribution, dev_dist, tolerance):
-            if count == 10:
-                raise TimeoutError("No suitable train/test split after 10 iterations, please relax tolerance")
+        while not check_distributions(distribution, dev_dist, mean_diff_tol, max_diff_tol):
+            if count == 1500:
+                raise TimeoutError("No suitable train/test split after 1500 iterations, please relax tolerance")
+
             # resample testing sites
             random.shuffle(random_sites)
             train_set = pd.DataFrame()
             dev_set = pd.DataFrame()
 
             current_p = 0.0
-
             # allocate sites to either dev or train such that
             # dev size = target_size (to 2 dp)
             for site in random_sites:
                 temp = full_dataset.loc[full_dataset['site'] == site, :]
-                current_p += temp.shape[0] / m
+                current_p += (temp.shape[0] / m)
 
-                if abs(current_p - p) <= 0.01:
-                    dev_set = dev_set.concat(temp)
+                if p >= current_p:
+                    if current_p - p > 0.01:
+                        train_set = pd.concat([train_set, temp])
+                    else:
+                        dev_set = pd.concat([dev_set, temp])
                 else:
-                    train_set = train_set.concat(temp)
+                    train_set = pd.concat([train_set, temp])
 
             dev_m = dev_set.shape[0]
             dev_dist = dev_set.select_dtypes(include='number').sum(axis=0).divide(dev_m)
@@ -160,10 +172,20 @@ def split_train_test(
             
         # save files
         files = [dev_feat, dev_lab, train_feat, train_lab]
-        for file, path in files, paths:
+        for file, path in zip(files, paths):
             file.to_csv(path)
         
         return train_feat, train_lab, dev_feat, dev_lab
+
+
+def check_distributions(dist1, dist2, mean_tol, max_tol):
+    mean_diff = check_mean_diff(dist1,dist2, mean_tol)
+    max_diff = check_max_diff(dist1, dist2, max_tol)
+    if mean_diff and max_diff:
+        return True
+    else:
+        return False
+    
 
 def check_mean_diff(a, b, tolerance):
     """
@@ -172,6 +194,14 @@ def check_mean_diff(a, b, tolerance):
     """
     mean_diff = sum(abs(a - b)) / len(a)
     if mean_diff < tolerance:
+        return True
+    else:
+        return False
+    
+
+def check_max_diff(a,b,tolerance):
+    diff = abs(a -b)
+    if max(diff) < tolerance:
         return True
     else:
         return False
