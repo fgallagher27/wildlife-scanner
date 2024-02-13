@@ -1,0 +1,5 @@
+default:
+    
+    # Model parameters
+    model:
+        batch_size: 32
