@@ -6,6 +6,11 @@ import os
 import random
 import numpy as np
 import pandas as pd
+import tensorflow as tf
+from tensorflow.keras.preprocessing import image
+from tensorflow.keras.applications import ResNet50
+from tensorflow.keras.applications.resnet50 import preprocess_input
+from typing import Tuple
 
 def split_train_test(
         features: pd.DataFrame,
@@ -75,7 +80,7 @@ def split_train_test(
         print("Checking loaded test set to match conditions...")
         if abs(dev_p - p) <= 0.01:
             print(f"Test size falls within acceptable range:\np = {p}\ndev_p = {dev_p}")
-            if check_mean_diff(distribution, dev_dist, tolerance):
+            if check_distributions(distribution, dev_dist, mean_diff_tol, max_diff_tol):
                 print(
                     f"Test proportion falls within acceptable proportion:\n"
                     f"Dataset proportion = {distribution}\n"
@@ -211,3 +216,83 @@ def split_by_type(df, type: str = 'number'):
     df1 = df.select_dtypes(include=type)
     df2 = df.select_dtypes(exclude=type)
     return df1, df2
+
+
+class ImageDataset(tf.data.Dataset):
+    """
+    Reads in an image, transforms pixel values, and saves
+    a dictionary with the image id, tensors, and label
+    """
+    def __init__(
+            self,
+            features:pd.DataFrame,
+            labels:pd.DataFrame=None,
+            img_target: Tuple[int, int] = (224, 224)
+        ):
+        self.data=features
+        self.label=labels
+        self.img_target = img_target
+
+        super(ImageDataset, self).__init__(
+            variant_tensor=tf.constant(0, dtype=tf.float32)
+        )
+
+    def _generator(self):
+        """
+        For a given index in each batch, we:
+            1.) retrieve the filepath
+            2.) load in the image and convert to array
+            3.) Conduct normalisation used in ResNet50
+            4.) Store as a tensor
+            5.) Return the image, id, and label if it exists
+        """
+        # for each image, read in, convert to array and normalize using
+        # the preprocessing function from ResNet50
+        ids=[]
+        images=[]
+
+        for _, row in self.data.iterrows():
+            img = image.load_img(
+                row['filepath'],
+                target_size=self.img_target,
+                color_mode="rgb"
+            )
+            img_arr = image.img_to_array(img)
+            img_proc = preprocess_input(img_arr)
+            images.append(img_proc)
+            ids.append(row.name)
+    
+        # store numpy array as tf tensor for convenience
+        images = tf.convert_to_tensor(images, dtype=tf.float32)
+
+        # self.label = None for test images
+        if self.label is None:
+            return {"image_id": ids, "image": images}
+        else:
+            labels = tf.convert_to_tensor(self.label, dtype=tf.float32)
+            return {"image_id": ids, "image": images, "label": labels}
+
+    def _inputs(self):
+        # does not take any external input tensors
+        return []
+    
+    @property
+    def element_spec(self):
+        return {
+            "image_id": tf.TensorSpec(shape=(), dtype=tf.string, name="image_id"),
+            "image": tf.TensorSpec(shape=(*self.img_target, 3), dtype=tf.float32, name="image"),
+            "label": tf.TensorSpec(shape=(), dtype=tf.float32, name="label") if self.label is not None else None
+        }
+
+    def __len__(self):
+        """
+        returns size of dataset
+        """
+        return len(self.data)
+
+    def __iter__(self):
+        return self._generator()
+
+
+# class model(tf.keras.model):
+#     pass
