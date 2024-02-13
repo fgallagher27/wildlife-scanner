@@ -6,6 +6,10 @@ data/
 
 #.DS_Store extensions
 .DS_store
+
+# VScode
+.vscode
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
