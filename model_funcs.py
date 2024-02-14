@@ -6,11 +6,13 @@ import os
 import random
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
 import tensorflow as tf
+from typing import Tuple, Union
 from tensorflow.keras.preprocessing import image
+from tensorflow.keras import layers, models
 from tensorflow.keras.applications import ResNet50
 from tensorflow.keras.applications.resnet50 import preprocess_input
-from typing import Tuple
 
 def split_train_test(
         features: pd.DataFrame,
@@ -227,72 +229,111 @@ class ImageDataset(tf.data.Dataset):
             self,
             features:pd.DataFrame,
             labels:pd.DataFrame=None,
-            img_target: Tuple[int, int] = (224, 224)
+            img_target: Tuple[int, int] = (224, 224),
+            num_classes: int = 8
         ):
         self.data=features
-        self.label=labels
+        self.labels=labels
+        self.indexes = features.index
         self.img_target = img_target
-
-        super(ImageDataset, self).__init__(
-            variant_tensor=tf.constant(0, dtype=tf.float32)
-        )
+        self.classes = num_classes
 
     def _generator(self):
         """
         For a given index in each batch, we:
             1.) retrieve the filepath
             2.) load in the image and convert to array
-            3.) Conduct normalisation used in ResNet50
-            4.) Store as a tensor
-            5.) Return the image, id, and label if it exists
+            3.) conduct normalisation used in ResNet50
+            4.) retrive the label if it exists
+            5.) return the processed image tensor and label
         """
-        # for each image, read in, convert to array and normalize using
-        # the preprocessing function from ResNet50
-        ids=[]
-        images=[]
+        for idx in self.indexes:
 
-        for _, row in self.data.iterrows():
+            # 1.) retrieve the filepath
+            img_path = self.data.loc[idx, 'filepath']
+            # 2.) load in the image and convert to array
             img = image.load_img(
-                row['filepath'],
+                img_path,
                 target_size=self.img_target,
                 color_mode="rgb"
             )
             img_arr = image.img_to_array(img)
+            # 3.) conduct normalisation used in ResNet50
             img_proc = preprocess_input(img_arr)
-            images.append(img_proc)
-            ids.append(row.name)
+
+            # 4.) retrieve the label if it exists
+            if self.labels is not None:
+                label = self.labels.loc[idx].values.astype(float)
+            else:
+                label = None
+
+            # 5.) return the processed image tensor and label
+            yield img_proc, label
+
+    def _as_variant_tensor(self):
+        return self
     
-        # store numpy array as tf tensor for convenience
-        images = tf.convert_to_tensor(images, dtype=tf.float32)
-
-        # self.label = None for test images
-        if self.label is None:
-            return {"image_id": ids, "image": images}
-        else:
-            labels = tf.convert_to_tensor(self.label, dtype=tf.float32)
-            return {"image_id": ids, "image": images, "label": labels}
-
     def _inputs(self):
-        # does not take any external input tensors
         return []
     
     @property
     def element_spec(self):
-        return {
-            "image_id": tf.TensorSpec(shape=(), dtype=tf.string, name="image_id"),
-            "image": tf.TensorSpec(shape=(*self.img_target, 3), dtype=tf.float32, name="image"),
-            "label": tf.TensorSpec(shape=(), dtype=tf.float32, name="label") if self.label is not None else None
-        }
+        return(
+            tf.TensorSpec(shape=(*self.img_target, 3), dtype=tf.float32),
+            tf.TensorSpec(shape=(self.classes,), dtype=tf.float32)
+        )
 
-    def __len__(self):
+    def _as_dataset(self):
+        return self
+
+
+class ConvModel(tf.keras.Model):
+
+    def __init__(
+            self,
+            input_shape: Tuple = (224, 224, 3),
+            dropout: bool = True,
+            dropout_rate: float = 0.1,
+            num_classes: int = 8):
+
+        super().__init__()
+        self.dropout_bool = dropout
+        
+        # Load pre-trained ResNet50
+        # exlcude classification layers and batch dimension
+        base_resnet = ResNet50(
+            weights='imagenet',
+            include_top=False,
+            input_shape=input_shape
+        )
+        # freeze weights in pre trained layers
+        for layer in base_resnet.layers:
+            layer.trainable=False
+
+        self.base = base_resnet
+        self.flatten = tf.keras.layers.Flatten()
+        self.dense1 = tf.keras.layers.Dense(100, activation='relu')
+        self.dropout = tf.keras.layers.Dropout(rate=dropout_rate)
+        self.dense2 = tf.keras.layers.Dense(num_classes, activation='softmax')
+
+    
+    def call(self, inputs):
         """
-        returns size of dataset
+        This function implements the forward
+        pass of the model
         """
-        return len(self.data)
+        x = self.base(inputs)
+        x = self.flatten(x)
+        x = self.dense1(x)
+        if self.dropout_bool:
+            x = self.dropout(x)
+        x = self.dense2(x)
+        return x
 
-    def __iter__(self):
-        return self._generator()
 
-
-# class model(tf.keras.model):
-#     pass
+def plot_loss(model):
+    plt.plot(model.history['loss'])
+    plt.title('Model Loss Over Epochs')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.show()
