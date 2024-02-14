@@ -6,11 +6,13 @@ import os
 import random
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
 import tensorflow as tf
+from typing import Tuple, Union
 from tensorflow.keras.preprocessing import image
+from tensorflow.keras import layers, models
 from tensorflow.keras.applications import ResNet50
 from tensorflow.keras.applications.resnet50 import preprocess_input
-from typing import Tuple
 
 def split_train_test(
         features: pd.DataFrame,
@@ -227,14 +229,17 @@ class ImageDataset(tf.data.Dataset):
             self,
             features:pd.DataFrame,
             labels:pd.DataFrame=None,
-            img_target: Tuple[int, int] = (224, 224)
+            img_target: Tuple[int, int] = (224, 224),
+            num_classes: int = 8
         ):
         self.data=features
         self.label=labels
         self.img_target = img_target
+        self.classes = num_classes
 
-        super(ImageDataset, self).__init__(
-            variant_tensor=tf.constant(0, dtype=tf.float32)
+        self.dataset = tf.data.Dataset.from_generator(
+            self._generator,
+            output_signature=self.element_spec
         )
 
     def _generator(self):
@@ -269,7 +274,7 @@ class ImageDataset(tf.data.Dataset):
         if self.label is None:
             return {"image_id": ids, "image": images}
         else:
-            labels = tf.convert_to_tensor(self.label, dtype=tf.float32)
+            labels = tf.keras.utils.to_categorical(self.label, num_classes = self.classes)
             return {"image_id": ids, "image": images, "label": labels}
 
     def _inputs(self):
@@ -281,7 +286,7 @@ class ImageDataset(tf.data.Dataset):
         return {
             "image_id": tf.TensorSpec(shape=(), dtype=tf.string, name="image_id"),
             "image": tf.TensorSpec(shape=(*self.img_target, 3), dtype=tf.float32, name="image"),
-            "label": tf.TensorSpec(shape=(), dtype=tf.float32, name="label") if self.label is not None else None
+            "label": tf.TensorSpec(shape=(self.classes), dtype=tf.float32, name="label") if self.label is not None else None
         }
 
     def __len__(self):
@@ -292,7 +297,103 @@ class ImageDataset(tf.data.Dataset):
 
     def __iter__(self):
         return self._generator()
+    
+    def _rename_input_key(self, element):
+        element['resnet50_input'] = element.pop("image")
+        return element
+
+    def rename_input(self):
+        return self.map(self._rename_input_key)
+    
+    def batch(self, batch_size):
+        return self.dataset.batch(batch_size)
+
+class ConvModel(tf.keras.Model):
+
+    def __init__(
+            self,
+            input_shape: Tuple = (224, 224, 3),
+            dropout: bool = True,
+            dropout_rate: float = 0.1,
+            num_classes: int = 8):
+
+        super().__init__()
+        self.dropout_bool = dropout
+        
+        # Load pre-trained ResNet50
+        # exlcude classification layers and batch dimension
+        base_resnet = ResNet50(
+            weights='imagenet',
+            include_top=False,
+            input_shape=input_shape
+        )
+        # freeze weights in pre trained layers
+        for layer in base_resnet.layers:
+            layer.trainable=False
+
+        self.base = base_resnet
+        self.flatten = tf.keras.layers.Flatten()
+        self.dense1 = tf.keras.layers.Dense(100, activation='relu')
+        self.dropout = tf.keras.layers.Dropout(rate=dropout_rate)
+        self.dense2 = tf.keras.layers.Dense(num_classes, activation='softmax')
+
+    
+    def call(self, inputs):
+        """
+        This function implements the forward
+        pass of the model
+        """
+        x = self.base(inputs)
+        x = self.flatten(x)
+        x = self.dense1(x)
+        if self.dropout_bool:
+            x = self.dropout(x)
+        x = self.dense2(x)
+        return x
 
 
-# class model(tf.keras.model):
-#     pass
+def build_model(
+        input_shape: Tuple = (224, 224, 3),
+        dropout: bool = True,
+        dropout_rate: float = 0.1,
+        num_classes: int = 8) -> tf.keras.Model:
+    # Load pre-trained ResNet model
+    # exclude the top (classification) layers so we just get weights
+    base_resnet = ResNet50(
+        weights='imagenet',
+        include_top=False,
+        input_shape=input_shape
+    )
+
+    # freeze the weights of pre-trained layers
+    for layer in base_resnet.layers:
+        layer.trainable=False
+
+    # add layers to base model
+    model = models.Sequential()
+    model.add(layers.InputLayer(input_shape))
+    model.add(base_resnet)
+    model.add(layers.Flatten())
+    model.add(layers.Dense(100, activation='relu'))
+    if dropout:
+        model.add(layers.Dropout(rate=dropout_rate))
+    model.add(layers.Dense(num_classes, activation='softmax'))
+
+    return model
+
+
+# def plot_loss(model, n_epochs):
+#     # determine the number of epochs and then construct the plot title
+#     N = np.arange(0, n_epochs)
+#     title = "Training Loss and Accuracy on CIFAR-10 ({})".format(
+#         args["model"])
+#     # plot the training loss and accuracy
+#     plt.style.use("ggplot")
+#     plt.figure()
+#     plt.plot(N, model.history["loss"], label="train_loss")
+#     plt.plot(N, model.history["val_loss"], label="val_loss")
+#     plt.title(title)
+#     plt.xlabel("Epoch #")
+#     plt.ylabel("Loss/Accuracy")
+#     plt.legend()
+#     plt.savefig(args["plot"])
