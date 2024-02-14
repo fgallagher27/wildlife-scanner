@@ -233,80 +233,59 @@ class ImageDataset(tf.data.Dataset):
             num_classes: int = 8
         ):
         self.data=features
-        self.label=labels
+        self.labels=labels
+        self.indexes = features.index
         self.img_target = img_target
         self.classes = num_classes
-
-        self.dataset = tf.data.Dataset.from_generator(
-            self._generator,
-            output_signature=self.element_spec
-        )
 
     def _generator(self):
         """
         For a given index in each batch, we:
             1.) retrieve the filepath
             2.) load in the image and convert to array
-            3.) Conduct normalisation used in ResNet50
-            4.) Store as a tensor
-            5.) Return the image, id, and label if it exists
+            3.) conduct normalisation used in ResNet50
+            4.) retrive the label if it exists
+            5.) return the processed image tensor and label
         """
-        # for each image, read in, convert to array and normalize using
-        # the preprocessing function from ResNet50
-        ids=[]
-        images=[]
+        for idx in self.indexes:
 
-        for _, row in self.data.iterrows():
+            # 1.) retrieve the filepath
+            img_path = self.data.loc[idx, 'filepath']
+            # 2.) load in the image and convert to array
             img = image.load_img(
-                row['filepath'],
+                img_path,
                 target_size=self.img_target,
                 color_mode="rgb"
             )
             img_arr = image.img_to_array(img)
+            # 3.) conduct normalisation used in ResNet50
             img_proc = preprocess_input(img_arr)
-            images.append(img_proc)
-            ids.append(row.name)
+
+            # 4.) retrieve the label if it exists
+            if self.labels is not None:
+                label = self.labels.loc[idx].values.astype(float)
+            else:
+                label = None
+
+            # 5.) return the processed image tensor and label
+            yield img_proc, label
+
+    def _as_variant_tensor(self):
+        return self
     
-        # store numpy array as tf tensor for convenience
-        images = tf.convert_to_tensor(images, dtype=tf.float32)
-
-        # self.label = None for test images
-        if self.label is None:
-            return {"image_id": ids, "image": images}
-        else:
-            labels = tf.keras.utils.to_categorical(self.label, num_classes = self.classes)
-            return {"image_id": ids, "image": images, "label": labels}
-
     def _inputs(self):
-        # does not take any external input tensors
         return []
     
     @property
     def element_spec(self):
-        return {
-            "image_id": tf.TensorSpec(shape=(), dtype=tf.string, name="image_id"),
-            "image": tf.TensorSpec(shape=(*self.img_target, 3), dtype=tf.float32, name="image"),
-            "label": tf.TensorSpec(shape=(self.classes), dtype=tf.float32, name="label") if self.label is not None else None
-        }
+        return(
+            tf.TensorSpec(shape=(*self.img_target, 3), dtype=tf.float32),
+            tf.TensorSpec(shape=(self.classes,), dtype=tf.float32)
+        )
 
-    def __len__(self):
-        """
-        returns size of dataset
-        """
-        return len(self.data)
+    def _as_dataset(self):
+        return self
 
-    def __iter__(self):
-        return self._generator()
-    
-    def _rename_input_key(self, element):
-        element['resnet50_input'] = element.pop("image")
-        return element
-
-    def rename_input(self):
-        return self.map(self._rename_input_key)
-    
-    def batch(self, batch_size):
-        return self.dataset.batch(batch_size)
 
 class ConvModel(tf.keras.Model):
 
@@ -352,18 +331,9 @@ class ConvModel(tf.keras.Model):
         return x
 
 
-# def plot_loss(model, n_epochs):
-#     # determine the number of epochs and then construct the plot title
-#     N = np.arange(0, n_epochs)
-#     title = "Training Loss and Accuracy on CIFAR-10 ({})".format(
-#         args["model"])
-#     # plot the training loss and accuracy
-#     plt.style.use("ggplot")
-#     plt.figure()
-#     plt.plot(N, model.history["loss"], label="train_loss")
-#     plt.plot(N, model.history["val_loss"], label="val_loss")
-#     plt.title(title)
-#     plt.xlabel("Epoch #")
-#     plt.ylabel("Loss/Accuracy")
-#     plt.legend()
-#     plt.savefig(args["plot"])
+def plot_loss(model):
+    plt.plot(model.history['loss'])
+    plt.title('Model Loss Over Epochs')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.show()
