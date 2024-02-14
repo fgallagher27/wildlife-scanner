@@ -352,36 +352,6 @@ class ConvModel(tf.keras.Model):
         return x
 
 
-def build_model(
-        input_shape: Tuple = (224, 224, 3),
-        dropout: bool = True,
-        dropout_rate: float = 0.1,
-        num_classes: int = 8) -> tf.keras.Model:
-    # Load pre-trained ResNet model
-    # exclude the top (classification) layers so we just get weights
-    base_resnet = ResNet50(
-        weights='imagenet',
-        include_top=False,
-        input_shape=input_shape
-    )
-
-    # freeze the weights of pre-trained layers
-    for layer in base_resnet.layers:
-        layer.trainable=False
-
-    # add layers to base model
-    model = models.Sequential()
-    model.add(layers.InputLayer(input_shape))
-    model.add(base_resnet)
-    model.add(layers.Flatten())
-    model.add(layers.Dense(100, activation='relu'))
-    if dropout:
-        model.add(layers.Dropout(rate=dropout_rate))
-    model.add(layers.Dense(num_classes, activation='softmax'))
-
-    return model
-
-
 # def plot_loss(model, n_epochs):
 #     # determine the number of epochs and then construct the plot title
 #     N = np.arange(0, n_epochs)
