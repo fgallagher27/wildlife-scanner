@@ -3,4 +3,5 @@ default:
     # Model parameters
     model:
         batch_size: 32
-        num_epochs: 5
+        num_epochs: 8
+        learning_rate: 0.01
