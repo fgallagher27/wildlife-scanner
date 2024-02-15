@@ -11,8 +11,7 @@ import tensorflow as tf
 from typing import Tuple, Union
 from tensorflow.keras.preprocessing import image
 from tensorflow.keras import layers, models
-from tensorflow.keras.applications import ResNet50
-from tensorflow.keras.applications.resnet50 import preprocess_input
+
 
 def split_train_test(
         features: pd.DataFrame,
@@ -227,6 +226,7 @@ class ImageDataset(tf.data.Dataset):
     """
     def __init__(
             self,
+            preprocess,
             features:pd.DataFrame,
             labels:pd.DataFrame=None,
             img_target: Tuple[int, int] = (224, 224),
@@ -237,6 +237,7 @@ class ImageDataset(tf.data.Dataset):
         self.indexes = features.index
         self.img_target = img_target
         self.classes = num_classes
+        self.preprocess = preprocess
 
     def _generator(self):
         """
@@ -259,7 +260,7 @@ class ImageDataset(tf.data.Dataset):
             )
             img_arr = image.img_to_array(img)
             # 3.) conduct normalisation used in ResNet50
-            img_proc = preprocess_input(img_arr)
+            img_proc = self.preprocess(img_arr)
 
             # 4.) retrieve the label if it exists
             if self.labels is not None:
@@ -297,6 +298,7 @@ class ConvModel(tf.keras.Model):
 
     def __init__(
             self,
+            base_model: tf.keras.Model,
             input_shape: Tuple = (224, 224, 3),
             dropout: bool = True,
             dropout_rate: float = 0.1,
@@ -307,7 +309,7 @@ class ConvModel(tf.keras.Model):
         
         # Load pre-trained ResNet50
         # exlcude classification layers and batch dimension
-        base_resnet = ResNet50(
+        base_resnet = base_model(
             weights='imagenet',
             include_top=False,
             input_shape=input_shape
@@ -340,10 +342,11 @@ class ConvModel(tf.keras.Model):
 def plot_loss(model, num_epochs: int, eval_set: bool = True):
     # start from epoch = 1 rather than 0
     epochs = range(1, num_epochs + 1)
-    plt.plot(epochs, model.history['loss'], label='Training Crossentropy loss')
+    plt.plot(epochs, model.history.history['loss'], label='Training Crossentropy loss')
     if eval_set:
-        plt.plot(epochs, model.history['val_loss'], label='Dev Crossentropy loss')
+        plt.plot(epochs, model.history.history['val_loss'], label='Dev Crossentropy loss')
     plt.title('Model Loss Over Epochs')
     plt.xlabel('Epoch')
     plt.ylabel('Loss')
+    plt.legend()
     plt.show()
