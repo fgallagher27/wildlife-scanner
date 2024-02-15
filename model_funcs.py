@@ -278,10 +278,16 @@ class ImageDataset(tf.data.Dataset):
     
     @property
     def element_spec(self):
-        return(
-            tf.TensorSpec(shape=(*self.img_target, 3), dtype=tf.float32),
-            tf.TensorSpec(shape=(self.classes,), dtype=tf.float32)
-        )
+        if self.labels is not None:
+            return(
+                tf.TensorSpec(shape=(*self.img_target, 3), dtype=tf.float32),
+                tf.TensorSpec(shape=(self.classes,), dtype=tf.float32)
+            )
+        else:
+            return(
+                tf.TensorSpec(shape=(*self.img_target, 3), dtype=tf.float32),
+                tf.TensorSpec(shape=(), dtype=tf.float32)
+            )
 
     def _as_dataset(self):
         return self
@@ -331,8 +337,14 @@ class ConvModel(tf.keras.Model):
         return x
 
 
-def plot_loss(model):
-    plt.plot(model.history['loss'])
+def plot_loss(model, num_epochs: int, eval_set: bool = True):
+    # start from epoch = 1 rather than 0
+    epochs = range(1, num_epochs + 1)
+    plt.plot(epochs, model.history['loss'], label='Training Crossentropy loss')
+    plt.plot(epochs, model.history['log_loss'], label='Training log loss')
+    if eval_set:
+        plt.plot(epochs, model.history['val_loss'], label='Dev Crossentropy loss')
+        plt.plot(epochs, model.history['val_log_loss'], label = 'Dev log loss')
     plt.title('Model Loss Over Epochs')
     plt.xlabel('Epoch')
     plt.ylabel('Loss')
