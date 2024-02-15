@@ -341,10 +341,8 @@ def plot_loss(model, num_epochs: int, eval_set: bool = True):
     # start from epoch = 1 rather than 0
     epochs = range(1, num_epochs + 1)
     plt.plot(epochs, model.history['loss'], label='Training Crossentropy loss')
-    plt.plot(epochs, model.history['log_loss'], label='Training log loss')
     if eval_set:
         plt.plot(epochs, model.history['val_loss'], label='Dev Crossentropy loss')
-        plt.plot(epochs, model.history['val_log_loss'], label = 'Dev log loss')
     plt.title('Model Loss Over Epochs')
     plt.xlabel('Epoch')
     plt.ylabel('Loss')
